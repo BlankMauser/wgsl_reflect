@@ -916,6 +916,28 @@ export async function run() {
         Math.imul(3000000000, 3000000000) >>> 0, Math.imul(-2000000000, 3) >>> 0, (-4) >>> 0]);
     });
 
+    await test("float to integer conversions saturate (negative to u32 is 0)", function (test) {
+      const runU32 = (body, n) => {
+        const shader = `@group(0) @binding(0) var<storage, read_write> inp: array<u32, 4>;
+          @group(0) @binding(1) var<storage, read_write> out: array<u32, ${n}>;
+          @compute @workgroup_size(1) fn main() {
+            let umax = inp[0]; let imin = bitcast<i32>(inp[1]); let mone = bitcast<i32>(inp[0]); let one = inp[2];
+            ${body}
+          }`;
+        const out = new Uint32Array(n);
+        const dbg = new WgslDebug(shader);
+        dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: new Uint32Array([0xffffffff, 0x80000000, 1, 0]).buffer, 1: out.buffer } });
+        let steps = 0;
+        while (dbg.stepNext()) { if (++steps > 10000) break; }
+        return Array.from(out);
+      };
+      const r = runU32(`let m = -1.5 * f32(one); let big = f32(umax) * 4.0;
+            out[0] = u32(m); out[1] = u32(f32(mone)); out[2] = u32(big); out[3] = bitcast<u32>(i32(big));
+            out[4] = bitcast<u32>(i32(-big)); out[5] = bitcast<u32>(i32(m)); out[6] = vec2<u32>(vec2<f32>(m, big)).x;
+            out[7] = vec2<u32>(vec2<f32>(m, big)).y; out[8] = bitcast<u32>(vec2<i32>(vec2<f32>(-big, 2.5)).x); out[9] = u32(2.9 * f32(one));`, 10);
+      test.equals(r, [0, 0, 4294967040, 2147483520, 0x80000000, (-1) >>> 0, 0, 4294967040, 0x80000000, 2]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex

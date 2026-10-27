@@ -2743,11 +2743,27 @@ export class WgslExec extends ExecInterface {
         // without converting would leave u32(0.5) holding 0.5, so an index
         // computed that way would silently address the wrong element.
         if (v instanceof ScalarData) {
-            const value = typeInfo?.name === "bool" ? (v.value !== 0 ? 1 : 0) : v.value;
+            let value = typeInfo?.name === "bool" ? (v.value !== 0 ? 1 : 0) : v.value;
+            if (v.data instanceof Float32Array && (typeInfo?.name === "i32" || typeInfo?.name === "u32")) {
+                value = this._floatToInt(value, typeInfo.name);
+            }
             return new ScalarData(value, typeInfo).getSubData(this, node.postfix, context);
         }
         v.typeInfo = typeInfo;
         return v.getSubData(this, node.postfix, context).clone();
+    }
+
+    // WGSL float -> integer conversion: truncate, saturating at the range
+    // limits representable in f32 (i32: [-2^31, 2147483520], u32:
+    // [0, 4294967040]); NaN converts to 0.
+    _floatToInt(v: number, target: string): number {
+        if (Number.isNaN(v)) {
+            return 0;
+        }
+        if (target === "u32") {
+            return Math.trunc(Math.min(Math.max(v, 0), 4294967040));
+        }
+        return Math.trunc(Math.min(Math.max(v, -2147483648), 2147483520));
     }
 
     _callConstructorVec(node: CreateExpr | LiteralExpr, context: ExecContext): Data | null {
@@ -2774,15 +2790,19 @@ export class WgslExec extends ExecInterface {
             if (node.args) {
                 for (const arg of node.args) {
                     const argValue = this.evalExpression(arg, context) ;
+                    // Float components converted to an integer vector saturate.
+                    const kind = this._intKind(typeInfo);
+                    const conv = (e: number, src: ScalarData | VectorData) => (kind !== null && src.data instanceof Float32Array)
+                        ? this._floatToInt(e, kind === "u" ? "u32" : "i32") : e;
                     if (argValue instanceof VectorData) {
                         const vd = argValue.data;
                         for (let i = 0; i < vd.length; ++i) {
                             let e = vd[i];
-                            values.push(e);
+                            values.push(conv(e, argValue));
                         }
                     } else if (argValue instanceof ScalarData) {
                         let v = argValue.value;
-                        values.push(v);
+                        values.push(conv(v, argValue));
                     }
                 }
             }
