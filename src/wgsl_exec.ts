@@ -762,8 +762,9 @@ export class WgslExec extends ExecInterface {
                         cv[i] -= v;
                     }
                 } else if (op === "*=") {
+                    const integer = !(cv instanceof Float32Array);
                     for (let i = 0; i < cv.length; ++i) {
-                        cv[i] *= v;
+                        cv[i] = integer ? Math.imul(cv[i], v) : cv[i] * v;
                     }
                 } else if (op === "/=") {
                     for (let i = 0; i < cv.length; ++i) {
@@ -791,7 +792,7 @@ export class WgslExec extends ExecInterface {
                     }
                 } else if (op === ">>=") {
                     for (let i = 0; i < cv.length; ++i) {
-                        cv[i] >>= v;
+                        cv[i] = cv instanceof Uint32Array ? cv[i] >>> v : cv[i] >> v;
                     }
                 } else {
                     console.error(`Invalid operator ${op}. Line ${node.line}`);
@@ -813,8 +814,9 @@ export class WgslExec extends ExecInterface {
                         cv[i] -= v[i];
                     }
                 } else if (op === "*=") {
+                    const integer = !(cv instanceof Float32Array);
                     for (let i = 0; i < cv.length; ++i) {
-                        cv[i] *= v[i];
+                        cv[i] = integer ? Math.imul(cv[i], v[i]) : cv[i] * v[i];
                     }
                 } else if (op === "/=") {
                     for (let i = 0; i < cv.length; ++i) {
@@ -842,7 +844,7 @@ export class WgslExec extends ExecInterface {
                     }
                 } else if (op === ">>=") {
                     for (let i = 0; i < cv.length; ++i) {
-                        cv[i] >>= v[i];
+                        cv[i] = cv instanceof Uint32Array ? cv[i] >>> v[i] : cv[i] >> v[i];
                     }
                 } else {
                     console.error(`Invalid operator ${op}. Line ${node.line}`);
@@ -853,7 +855,8 @@ export class WgslExec extends ExecInterface {
                 } else if (op === "-=") {
                     currentValue.value -= value.value;
                 } else if (op === "*=") {
-                    currentValue.value *= value.value;
+                    currentValue.value = currentValue.data instanceof Float32Array
+                        ? currentValue.value * value.value : Math.imul(currentValue.value, value.value);
                 } else if (op === "/=") {
                     currentValue.value /= value.value;
                 } else if (op === "%=") {
@@ -867,7 +870,8 @@ export class WgslExec extends ExecInterface {
                 } else if (op === "<<=") {
                     currentValue.value <<= value.value;
                 } else if (op === ">>=") {
-                    currentValue.value >>= value.value;
+                    currentValue.value = currentValue.data instanceof Uint32Array
+                        ? currentValue.value >>> value.value : currentValue.value >> value.value;
                 } else {
                     console.error(`Invalid operator ${op}. Line ${node.line}`);
                 }
@@ -1162,16 +1166,16 @@ export class WgslExec extends ExecInterface {
         const unsigned = data instanceof Uint32Array;
         for (let i = 0; i < indices.length; ++i) {
             const k = indices[i];
-            data[k] = op === "=" ? rhs[i] : this._compoundAssignOp(op, data[k], rhs[i], unsigned, node);
+            data[k] = op === "=" ? rhs[i] : this._compoundAssignOp(op, data[k], rhs[i], unsigned, node, !(data instanceof Float32Array));
         }
         return true;
     }
 
-    _compoundAssignOp(op: string, a: number, b: number, unsigned: boolean, node: Node): number {
+    _compoundAssignOp(op: string, a: number, b: number, unsigned: boolean, node: Node, integer = false): number {
         switch (op) {
             case "+=": return a + b;
             case "-=": return a - b;
-            case "*=": return a * b;
+            case "*=": return integer ? Math.imul(a, b) : a * b;
             case "/=": return a / b;
             case "%=": return a % b;
             case "&=": return a & b;
@@ -1789,6 +1793,26 @@ export class WgslExec extends ExecInterface {
         return new VectorData(values, typeInfo);
     }
 
+    // "u" for u32 scalars and vectors, "i" for i32 ones, null otherwise
+    // (floats, bools, and abstract ints, which follow const-expression rules).
+    _intKind(t: TypeInfo | null): "u" | "i" | null {
+        if (t === null || t === undefined) {
+            return null;
+        }
+        const n = t.getTypeName();
+        if (n === "u32" || /^vec[234]u$/.test(n) || /<u32>$/.test(n)) {
+            return "u";
+        }
+        if (n === "i32" || /^vec[234]i$/.test(n) || /<i32>$/.test(n)) {
+            return "i";
+        }
+        const f = (t as TemplateInfo).format;
+        if (f && (f.name === "u32" || f.name === "i32")) {
+            return f.name === "u32" ? "u" : "i";
+        }
+        return null;
+    }
+
     _evalBinaryOp(node: BinaryOperator, context: ExecContext): Data | null {
         // The postfix is applied to the (possibly parenthesized) expression's
         // result: e.g. the ".w" of `(v * 2.0).w`.
@@ -1900,13 +1924,15 @@ export class WgslExec extends ExecInterface {
                             console.error(`Vector length mismatch: ${_l.typeInfo.getTypeName()}[${la.length}] '${node.operator}' ${_r.typeInfo.getTypeName()}[${ra.length}]. Line ${node.line}.`);
                             return null;
                         }
-                        const result = la.map((x: number, i: number) => x * ra[i]);
+                        const imul = this._intKind(_l.typeInfo) !== null;
+                        const result = la.map((x: number, i: number) => imul ? Math.imul(x, ra[i]) : x * ra[i]);
                         return this._makeCwiseData(result, _l.typeInfo);
                     }
                 } else if (isArray(l)) {
                     const la = l as number[];
                     const rn = r as number;
-                    const result = la.map((x: number, i: number) => x * rn);
+                    const imul = this._intKind(_l.typeInfo) !== null;
+                    const result = la.map((x: number, i: number) => imul ? Math.imul(x, rn) : x * rn);
                     if (this._isMatrixType(_l)) {
                         return new MatrixData(result, _l.typeInfo);
                     }
@@ -1914,7 +1940,8 @@ export class WgslExec extends ExecInterface {
                 } else if (isArray(r)) {
                     const ln = l as number;
                     const ra = r as number[];
-                    const result = ra.map((x: number, i: number) => ln * x);
+                    const imul = this._intKind(_r.typeInfo) !== null;
+                    const result = ra.map((x: number, i: number) => imul ? Math.imul(ln, x) : ln * x);
                     if (_r instanceof MatrixData) {
                         return new MatrixData(result, _r.typeInfo);
                     }
@@ -1924,7 +1951,8 @@ export class WgslExec extends ExecInterface {
                 const ln = l as number;
                 const rn = r as number;
                 const t = this._maxFormatTypeInfo([_l.typeInfo, _r.typeInfo]);
-                return new ScalarData(ln * rn, t);
+                // u32 / i32 products wrap modulo 2^32 (doubles would lose the low bits).
+                return new ScalarData(this._intKind(t) !== null ? Math.imul(ln, rn) : ln * rn, t);
             }
             case "%": {
                 if (isArray(l) && isArray(r)) {
@@ -2090,23 +2118,27 @@ export class WgslExec extends ExecInterface {
                         console.error(`Vector length mismatch: ${_l.typeInfo.getTypeName()}[${la.length}] '${node.operator}' ${_r.typeInfo.getTypeName()}[${ra.length}]. Line ${node.line}.`);
                         return null;
                     }
-                    const result = la.map((x: number, i: number) => x >> ra[i]);
+                    const u = this._intKind(_l.typeInfo) === "u";
+                    const result = la.map((x: number, i: number) => u ? x >>> ra[i] : x >> ra[i]);
                     return this._makeCwiseData(result, _l.typeInfo);
                 } else if (isArray(l)) {
                     const la = l as number[];
                     const rn = r as number;
-                    const result = la.map((x: number, i: number) => x >> rn);
+                    const u = this._intKind(_l.typeInfo) === "u";
+                    const result = la.map((x: number, i: number) => u ? x >>> rn : x >> rn);
                     return this._makeCwiseData(result, _l.typeInfo);
                 } else if (isArray(r)) {
                     const ln = l as number;
                     const ra = r as number[];
-                    const result = ra.map((x: number, i: number) => ln >> x);
+                    const u = this._intKind(_l.typeInfo) === "u";
+                    const result = ra.map((x: number, i: number) => u ? ln >>> x : ln >> x);
                     return this._makeCwiseData(result, _r.typeInfo);
                 }
                 const ln = l as number;
                 const rn = r as number;
                 const t = this._maxFormatTypeInfo([_l.typeInfo, _r.typeInfo]);
-                return new ScalarData(ln >> rn, t);
+                // u32 shifts are logical; i32 shifts are arithmetic.
+                return new ScalarData(this._intKind(_l.typeInfo) === "u" ? ln >>> rn : ln >> rn, t);
             }
             case ">": {
                 if (isArray(l) && isArray(r)) {

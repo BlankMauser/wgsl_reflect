@@ -875,6 +875,47 @@ export async function run() {
       test.equals(dbg.getReturnValue(), [1, 10, 0, 1]);
     });
 
+    await test("u32 and i32 arithmetic wraps like the GPU (products, logical shifts)", function (test) {
+      // A PCG-style hash: products far beyond 2^53 and shifts of values >= 2^31.
+      const shader = `
+        @group(0) @binding(0) var<storage, read_write> out: array<u32>;
+        fn hash(x: u32) -> u32 {
+          var h = x * 747796405u + 2891336453u;
+          h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+          return (h >> 22u) ^ h;
+        }
+        @compute @workgroup_size(1)
+        fn main() {
+          out[0] = hash(1000u);
+          var a = 4000000005u;
+          a >>= 3u;
+          out[1] = a;
+          var b = 3000000000u;
+          b *= 3000000000u;
+          out[2] = b;
+          let v = vec2<u32>(4000000005u, 3000000000u) >> vec2<u32>(3u, 1u);
+          out[3] = v.x;
+          out[4] = v.y;
+          let w = vec2<u32>(3000000000u, 7u) * 3000000000u;
+          out[5] = w.x;
+          out[6] = bitcast<u32>(i32(-2000000000) * 3);
+          let n = -8;
+          let half = n >> 1u;
+          out[7] = bitcast<u32>(half);
+        }`;
+      const js = (x) => {
+        let h = (Math.imul(x, 747796405) + 2891336453) >>> 0;
+        h = Math.imul(((h >>> ((h >>> 28) + 4)) ^ h) >>> 0, 277803737) >>> 0;
+        return ((h >>> 22) ^ h) >>> 0;
+      };
+      const out = new Uint32Array(8);
+      const dbg = new WgslDebug(shader);
+      dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: out.buffer } });
+      while (dbg.stepNext());
+      test.equals(Array.from(out), [js(1000), 500000000, Math.imul(3000000000, 3000000000) >>> 0, 500000000, 1500000000,
+        Math.imul(3000000000, 3000000000) >>> 0, Math.imul(-2000000000, 3) >>> 0, (-4) >>> 0]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex
