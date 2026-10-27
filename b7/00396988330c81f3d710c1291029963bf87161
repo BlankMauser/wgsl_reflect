@@ -1,0 +1,16 @@
+src/wgsl_exec.ts
+  h_03360edcd9e88f 2746-2749,2756-2768,2793-2796,2801,2805
+test/tests/test_debug.js
+  h_03360edcd9e88f 919-940
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b700396988330c81f3d710c1291029963bf87161",
+  "prompts": {},
+  "humans": {
+    "h_03360edcd9e88f": {
+      "author": "BlankMauser <thomasluvan@gmail.com>"
+    }
+  }
+}
