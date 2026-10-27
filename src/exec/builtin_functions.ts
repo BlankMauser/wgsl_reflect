@@ -244,13 +244,14 @@ export class BuiltinFunctions {
         return new ScalarData(Math.clz32(s.value), value.typeInfo);
     }
 
+    // Bit counts work on the 32-bit pattern (a negative i32 has its sign bit
+    // set; an arithmetic shift would never reach zero).
     _countOneBits(value: number): number {
+        let v = value >>> 0;
         let count = 0;
-        while (value !== 0) {
-            if (value & 1) {
-                count++;
-            }
-            value >>= 1;
+        while (v !== 0) {
+            count += v & 1;
+            v >>>= 1;
         }
         return count;
     }
@@ -265,15 +266,8 @@ export class BuiltinFunctions {
     }
 
     _countTrailingZeros(value: number): number {
-        if (value === 0) {
-            return 32; // Special case for 0
-        }
-        let count = 0;
-        while ((value & 1) === 0) {
-            value >>= 1;
-            count++;
-        }
-        return count;
+        const v = value >>> 0;
+        return v === 0 ? 32 : 31 - Math.clz32(v & -v);
     }
 
     CountTrailingZeros(node: CallExpr | Call, context: ExecContext): Data | null {
@@ -474,27 +468,34 @@ export class BuiltinFunctions {
         return null;
     }
 
-    _firstLeadingBit(s: number): number {
-        if (s === 0) {
-            return -1;
+    // firstLeadingBit: for u32 the highest set bit (-1, i.e. 0xffffffff, for
+    // 0); for i32 the highest bit that differs from the sign bit (-1 for 0
+    // and -1).
+    _firstLeadingBit(s: number, signed: boolean): number {
+        if (signed) {
+            const v = s | 0;
+            if (v === 0 || v === -1) {
+                return -1;
+            }
+            return 31 - Math.clz32(v < 0 ? ~v : v);
         }
-        return 31 - Math.clz32(s);  // clz32: count leading zeros
+        const u = s >>> 0;
+        return u === 0 ? -1 : 31 - Math.clz32(u);
     }
 
     FirstLeadingBit(node: CallExpr | Call, context: ExecContext): Data | null {
         const value = this.exec.evalExpression(node.args[0], context);
+        const signed = (value as ScalarData | VectorData).data instanceof Int32Array;
         if (value instanceof VectorData) {
-            return new VectorData(value.data.map((v: number) => this._firstLeadingBit(v)), value.typeInfo);
+            return new VectorData(value.data.map((v: number) => this._firstLeadingBit(v, signed)), value.typeInfo);
         }
         const s = value as ScalarData;
-        return new ScalarData(this._firstLeadingBit(s.value), value.typeInfo);
+        return new ScalarData(this._firstLeadingBit(s.value, signed), value.typeInfo);
     }
 
     _firstTrailingBit(s: number): number {
-        if (s === 0) {
-            return -1;
-        }
-        return Math.log2(s & -s); // n & -n isolates the lowest set bit.  Math.log2 gives its position.
+        const v = s >>> 0;
+        return v === 0 ? -1 : 31 - Math.clz32(v & -v);
     }
 
     FirstTrailingBit(node: CallExpr | Call, context: ExecContext): Data | null {

@@ -938,6 +938,28 @@ export async function run() {
       test.equals(r, [0, 0, 4294967040, 2147483520, 0x80000000, (-1) >>> 0, 0, 4294967040, 0x80000000, 2]);
     });
 
+    await test("bit counts and positions on negative and high-bit values", function (test) {
+      const runU32 = (body, n) => {
+        const shader = `@group(0) @binding(0) var<storage, read_write> inp: array<u32, 4>;
+          @group(0) @binding(1) var<storage, read_write> out: array<u32, ${n}>;
+          @compute @workgroup_size(1) fn main() {
+            let umax = inp[0]; let imin = bitcast<i32>(inp[1]); let mone = bitcast<i32>(inp[0]); let one = inp[2];
+            ${body}
+          }`;
+        const out = new Uint32Array(n);
+        const dbg = new WgslDebug(shader);
+        dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: new Uint32Array([0xffffffff, 0x80000000, 1, 0]).buffer, 1: out.buffer } });
+        let steps = 0;
+        while (dbg.stepNext()) { if (++steps > 10000) break; }
+        return Array.from(out);
+      };
+      const r = runU32(`out[0] = bitcast<u32>(firstLeadingBit(mone)); out[1] = bitcast<u32>(firstLeadingBit(imin));
+            out[2] = bitcast<u32>(firstLeadingBit(-8 * bitcast<i32>(one))); out[3] = bitcast<u32>(firstLeadingBit(bitcast<i32>(one)));
+            out[4] = firstLeadingBit(umax); out[5] = bitcast<u32>(firstTrailingBit(imin)); out[6] = firstTrailingBit(0x80000000u * one);
+            out[7] = bitcast<u32>(countOneBits(mone)); out[8] = bitcast<u32>(countTrailingZeros(imin)); out[9] = countTrailingZeros(umax - umax);`, 10);
+      test.equals(r, [0xffffffff, 30, 2, 0, 31, 31, 31, 32, 31, 32]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex
