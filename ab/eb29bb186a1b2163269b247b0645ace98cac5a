@@ -1,0 +1,14 @@
+test/tests/test_debug.js
+  h_03360edcd9e88f 816-877
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "abeb29bb186a1b2163269b247b0645ace98cac5a",
+  "prompts": {},
+  "humans": {
+    "h_03360edcd9e88f": {
+      "author": "BlankMauser <thomasluvan@gmail.com>"
+    }
+  }
+}
