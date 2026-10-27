@@ -983,6 +983,28 @@ export async function run() {
       test.equals(r, [0xff, 0xffffffff, 0xfffffff8, 0x67, 0xffffffff, 0, 1, 0xc0000000, 0xffffffff, 0xff0, 0xffffffff]);
     });
 
+    await test("integer dot products wrap and keep the element type", function (test) {
+      const runU32 = (body, n) => {
+        const shader = `@group(0) @binding(0) var<storage, read_write> inp: array<u32, 4>;
+          @group(0) @binding(1) var<storage, read_write> out: array<u32, ${n}>;
+          @compute @workgroup_size(1) fn main() {
+            let umax = inp[0]; let imin = bitcast<i32>(inp[1]); let mone = bitcast<i32>(inp[0]); let one = inp[2];
+            ${body}
+          }`;
+        const out = new Uint32Array(n);
+        const dbg = new WgslDebug(shader);
+        dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: new Uint32Array([0xffffffff, 0x80000000, 1, 0]).buffer, 1: out.buffer } });
+        let steps = 0;
+        while (dbg.stepNext()) { if (++steps > 10000) break; }
+        return Array.from(out);
+      };
+      const r = runU32(`let half = umax / 2u; let imax = bitcast<i32>(half);
+            out[0] = bitcast<u32>(dot(vec2<i32>(imax, imax), vec2<i32>(2, 1)));
+            out[1] = dot(vec2<u32>(umax, umax), vec2<u32>(umax, 2u)); out[2] = bitcast<u32>(dot(vec3<i32>(imin, imin, 1), vec3<i32>(mone, mone, imin)));
+            out[3] = dot(vec4<u32>(one, 2u, 3u, 4u), vec4<u32>(5u, 6u, 7u, 8u));`, 4);
+      test.equals(r, [0x7ffffffd, 0xffffffff, 0x80000000, 70]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex

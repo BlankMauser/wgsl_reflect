@@ -376,6 +376,17 @@ export class BuiltinFunctions {
         const l = this.exec.evalExpression(node.args[0], context);
         const r = this.exec.evalExpression(node.args[1], context);
         if (l instanceof VectorData && r instanceof VectorData) {
+            // Integer vectors: products and sum wrap modulo 2^32, and the
+            // result has the element type (i32 or u32).
+            if (l.data instanceof Int32Array || l.data instanceof Uint32Array) {
+                let sum = 0;
+                for (let i = 0; i < l.data.length; ++i) {
+                    sum = (sum + Math.imul(l.data[i], r.data[i])) | 0;
+                }
+                return l.data instanceof Int32Array
+                    ? new ScalarData(sum, this.getTypeInfo("i32"))
+                    : new ScalarData(sum >>> 0, this.getTypeInfo("u32"));
+            }
             return new ScalarData(this._dot(l.data, r.data), this.getTypeInfo("f32"));
         }
         console.error(`Dot() expects vector arguments. Line ${node.line}`);
