@@ -960,6 +960,29 @@ export async function run() {
       test.equals(r, [0xffffffff, 30, 2, 0, 31, 31, 31, 32, 31, 32]);
     });
 
+    await test("extractBits sign-extends i32 fields; insertBits/extractBits clamp offset and count", function (test) {
+      const runU32 = (body, n) => {
+        const shader = `@group(0) @binding(0) var<storage, read_write> inp: array<u32, 4>;
+          @group(0) @binding(1) var<storage, read_write> out: array<u32, ${n}>;
+          @compute @workgroup_size(1) fn main() {
+            let umax = inp[0]; let imin = bitcast<i32>(inp[1]); let mone = bitcast<i32>(inp[0]); let one = inp[2];
+            ${body}
+          }`;
+        const out = new Uint32Array(n);
+        const dbg = new WgslDebug(shader);
+        dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: new Uint32Array([0xffffffff, 0x80000000, 1, 0]).buffer, 1: out.buffer } });
+        let steps = 0;
+        while (dbg.stepNext()) { if (++steps > 10000) break; }
+        return Array.from(out);
+      };
+      const r = runU32(`let x = 0x12345678u * one; let xi = bitcast<i32>(x);
+            out[0] = extractBits(umax, 4u, 8u); out[1] = bitcast<u32>(extractBits(mone, 4u, 8u)); out[2] = bitcast<u32>(extractBits(imin, 28u, 4u));
+            out[3] = bitcast<u32>(extractBits(xi, 4u, 8u)); out[4] = extractBits(umax, 0u, 32u); out[5] = extractBits(umax, 4u, 0u);
+            out[6] = extractBits(x, 28u, 8u); out[7] = insertBits(0u * one, umax, 30u, 8u); out[8] = insertBits(umax, 0u * one, 4u, 0u);
+            out[9] = bitcast<u32>(insertBits(bitcast<i32>(0u * one), mone, 4u, 8u)); out[10] = insertBits(0u * one, umax, 0u, 32u);`, 11);
+      test.equals(r, [0xff, 0xffffffff, 0xfffffff8, 0x67, 0xffffffff, 0, 1, 0xc0000000, 0xffffffff, 0xff0, 0xffffffff]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex

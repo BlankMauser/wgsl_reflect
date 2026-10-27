@@ -425,32 +425,30 @@ export class BuiltinFunctions {
         return new ScalarData(Math.pow(2, s.value), value.typeInfo);
     }
 
+    // extractBits(e, offset, count): offset and count clamp to 32 bits
+    // (o = min(offset, 32), c = min(count, 32 - o)); u32 zero-extends the
+    // field, i32 sign-extends it; c == 0 gives 0.
+    _extractBits(v: number, o: number, c: number, signed: boolean): number {
+        o = Math.min(o >>> 0, 32);
+        c = Math.min(c >>> 0, 32 - o);
+        if (c === 0) {
+            return 0;
+        }
+        const field = (v >>> o) << (32 - c);
+        return signed ? field >> (32 - c) : field >>> (32 - c);
+    }
+
     ExtractBits(node: CallExpr | Call, context: ExecContext): Data | null {
         const value = this.exec.evalExpression(node.args[0], context);
-        const offset = this.exec.evalExpression(node.args[1], context);
-        const count = this.exec.evalExpression(node.args[2], context);
-        if (offset.typeInfo.name !== "u32" && offset.typeInfo.name !== "x32") {
-            console.error(`ExtractBits() expects an i32 offset argument. Line ${node.line}`);
-            return null;
-        }
-        if (count.typeInfo.name !== "u32" && count.typeInfo.name !== "x32") {
-            console.error(`ExtractBits() expects an i32 count argument. Line ${node.line}`);
-            return null;
-        }
-
-        const o = (offset as ScalarData).value;
-        const c = (count as ScalarData).value;
-
+        const offset = this.exec.evalExpression(node.args[1], context) as ScalarData;
+        const count = this.exec.evalExpression(node.args[2], context) as ScalarData;
+        const signed = (value as ScalarData | VectorData).data instanceof Int32Array;
+        const o = offset.value;
+        const c = count.value;
         if (value instanceof VectorData) {
-            return new VectorData(value.data.map((v: number) => (v >> o) & ((1 << c) - 1)), value.typeInfo);
+            return new VectorData(value.data.map((v: number) => this._extractBits(v, o, c, signed)), value.typeInfo);
         }
-
-        if (value.typeInfo.name !== "i32" && value.typeInfo.name !== "x32") {
-            console.error(`ExtractBits() expects an i32 argument. Line ${node.line}`);
-            return null;
-        }
-        const v = (value as ScalarData).value;
-        return new ScalarData((v >> o) & ((1 << c) - 1), this.getTypeInfo("i32"));
+        return new ScalarData(this._extractBits((value as ScalarData).value, o, c, signed), value.typeInfo);
     }
 
     FaceForward(node: CallExpr | Call, context: ExecContext): Data | null {
@@ -560,30 +558,27 @@ export class BuiltinFunctions {
         return new ScalarData(fract(s.value), value.typeInfo);
     }
 
+    // insertBits(e, newbits, offset, count): the same clamping; c == 0
+    // leaves e unchanged.
+    _insertBits(v: number, n: number, o: number, c: number): number {
+        o = Math.min(o >>> 0, 32);
+        c = Math.min(c >>> 0, 32 - o);
+        if (c === 0) {
+            return v;
+        }
+        const mask = ((0xffffffff >>> (32 - c)) << o) >>> 0;
+        return ((v & ~mask) | ((n << o) & mask)) >>> 0;
+    }
+
     InsertBits(node: CallExpr | Call, context: ExecContext): Data | null {
         const value = this.exec.evalExpression(node.args[0], context);
         const insert = this.exec.evalExpression(node.args[1], context);
-        const offset = this.exec.evalExpression(node.args[2], context);
-        const count = this.exec.evalExpression(node.args[3], context);
-
-        if (offset.typeInfo.name !== "u32" && offset.typeInfo.name !== "x32") {
-            console.error(`InsertBits() expects an i32 offset argument. Line ${node.line}`);
-            return null;
-        }
-
-        const o = (offset as ScalarData).value;
-        const c = (count as ScalarData).value;
-        const mask = ((1 << c) - 1) << o;
-        const invMask = ~mask;
-
+        const o = (this.exec.evalExpression(node.args[2], context) as ScalarData).value;
+        const c = (this.exec.evalExpression(node.args[3], context) as ScalarData).value;
         if (value instanceof VectorData && insert instanceof VectorData) {
-            return new VectorData(value.data.map((v: number, i: number) => {
-                return (v & invMask) | ((insert.data[i] << o) & mask);
-            }), value.typeInfo);
+            return new VectorData(value.data.map((v: number, i: number) => this._insertBits(v, insert.data[i], o, c)), value.typeInfo);
         }
-        const v = (value as ScalarData).value;
-        const i = (insert as ScalarData).value;
-        return new ScalarData((v & invMask) | ((i << o) & mask), value.typeInfo);
+        return new ScalarData(this._insertBits((value as ScalarData).value, (insert as ScalarData).value, o, c), value.typeInfo);
     }
 
     InverseSqrt(node: CallExpr | Call, context: ExecContext): Data | null {
