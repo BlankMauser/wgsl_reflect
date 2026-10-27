@@ -875,6 +875,21 @@ export async function run() {
       test.equals(dbg.getReturnValue(), [1, 10, 0, 1]);
     });
 
+    await test("type-inferred array constructor", function (test) {
+      const shader = `
+        @vertex
+        fn main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+          var p = array(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+          let s = array(1, 2, 3);
+          let v = array(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0));
+          return vec4<f32>(p[i], f32(s[2]), v[1].z);
+        }`;
+      const dbg = new WgslDebug(shader);
+      dbg.debugVertex("main", { vertex_index: 1 }, {});
+      while (dbg.stepNext());
+      test.equals(dbg.getReturnValue(), [3, -1, 3, 6]);
+    });
+
     await test("single-lane derivatives are zero", function (test) {
       const shader = `
         @fragment

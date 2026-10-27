@@ -1533,6 +1533,12 @@ export class WgslExec extends ExecInterface {
             }
         }
 
+        // array(e0, e1, ...): the element type and count come from the arguments.
+        if (node instanceof CreateExpr && node.type instanceof ArrayType && node.type.format === null &&
+            node.args && node.args.length > 0) {
+            return this._evalInferredArray(node, context);
+        }
+
         const typeName = (node instanceof CreateExpr) ? node.type.name : node.name;
         const typeInfo = (node instanceof CreateExpr) ? this.getTypeInfo(node.type) : this.getTypeInfo(node.name);
         if (typeInfo === null) {
@@ -1584,6 +1590,39 @@ export class WgslExec extends ExecInterface {
         }
 
         return data;
+    }
+
+    // The type-inferred array constructor, array(e0, ..., eN-1): array<E, N>
+    // where E is the type of the arguments (abstract int as i32).
+    _evalInferredArray(node: CreateExpr, context: ExecContext): Data | null {
+        const values: Data[] = [];
+        for (const arg of node.args!) {
+            const v = this.evalExpression(arg, context);
+            if (v === null) {
+                console.error(`Invalid array element. Line ${node.line}`);
+                return null;
+            }
+            values.push(v);
+        }
+        let elem = values[0].typeInfo;
+        if (elem.name === "x32") {
+            elem = this.getTypeInfo("i32");
+        }
+        const size = this.reflection._getTypeSize(elem);
+        if (size === null) {
+            console.error(`Unknown array element type ${elem.getTypeName()}. Line ${node.line}`);
+            return null;
+        }
+        const info = new ArrayInfo("array", null);
+        info.format = elem;
+        info.count = values.length;
+        info.stride = this.reflection._roundUp(size.align, size.size);
+        info.size = info.stride * info.count;
+        const data = new TypedData(new ArrayBuffer(info.size), info, 0);
+        for (let i = 0; i < values.length; ++i) {
+            data.setData(this, values[i], elem, i * info.stride, context);
+        }
+        return data.getSubData(this, node.postfix, context);
     }
 
     _evalLiteral(node: LiteralExpr, context: ExecContext): Data | null {
