@@ -1123,6 +1123,7 @@ export class BuiltinFunctions {
         if (a === null) {
             return null;
         }
+        this._applyOffset(a, node, textureIndex + (a.texture.typeInfo.name.includes("_array") ? 4 : 3), 0, context);
         const sampler = this._resolveSampler(node.args[textureIndex + 1], context);
         const texels = this._gatherTexels(a.texture, a.u, a.v, a.layer, sampler);
         const channel = Math.max(0, Math.min(component, 3));
@@ -1182,18 +1183,17 @@ export class BuiltinFunctions {
                 const y = Math.floor(uv.data[1]);
                 const z = Math.floor(zVal);
                 const level = Math.floor(mipLevel)
-                if (x < 0 || x >= texture.width || y < 0 || y >= texture.height) {
-                    console.error(`Texture ${textureName} out of bounds. Line ${node.line}`);
-                    return null;
-                }
-
-                const texel = texture.getPixel(x, y, z, level);
+                // Out of bounds: WGSL lets an implementation return any texel or
+                // zero; wgpu (naga's ReadZeroSkipWrite) returns zero.
+                const size = texture.getMipLevelSize(level);
+                const outside = x < 0 || x >= Math.max(1, size[0]) || y < 0 || y >= Math.max(1, size[1]);
+                const texel = outside ? [0, 0, 0, 0] : texture.getPixel(x, y, z, level);
                 if (texel === null) {
                     console.error(`Invalid texture format for textureLoad. Line ${node.line}`);
                     return null;
                 }
 
-                return new VectorData(texel, this.getTypeInfo("vec4f"));
+                return this._loadResult(texture, texel);
             } else {
                 console.error(`Texture ${textureName} not found. Line ${node.line}`);
                 return null;
@@ -1202,6 +1202,40 @@ export class BuiltinFunctions {
 
         console.error(`Invalid texture argument for textureLoad. Line ${node.line}`);
         return null;
+    }
+
+    // The WGSL result type of textureLoad: f32 for depth textures, vec4u /
+    // vec4i for integer textures (texture_2d<u32>, r32uint storage), vec4f
+    // otherwise.
+    _loadResult(texture: TextureData, texel: number[]): Data {
+        if (texture.typeInfo.name.includes("depth")) {
+            return new ScalarData(texel[0], this.getTypeInfo("f32"));
+        }
+        const format = (texture.typeInfo as TemplateInfo).format?.name ?? "";
+        if (format === "u32" || format.endsWith("uint")) {
+            return new VectorData(texel, this.getTypeInfo("vec4u"));
+        }
+        if (format === "i32" || format.endsWith("sint")) {
+            return new VectorData(texel, this.getTypeInfo("vec4i"));
+        }
+        return new VectorData(texel, this.getTypeInfo("vec4f"));
+    }
+
+    // Applies the optional const texel offset argument of the textureSample*
+    // family (at `index`, when present) to a resolved 2-D sample address, in
+    // texels of mip level `lod` (rounded down).
+    _applyOffset(a: { texture: TextureData, u: number, v: number, r: number | null }, node: CallExpr | Call,
+            index: number, lod: number, context: ExecContext): void {
+        if (node.args.length <= index || a.r !== null || a.texture.typeInfo.name.includes("_cube")) {
+            return;
+        }
+        const off = this.exec.evalExpression(node.args[index], context);
+        if (!(off instanceof VectorData) || off.data.length < 2) {
+            return;
+        }
+        const size = a.texture.getMipLevelSize(Math.max(0, Math.floor(lod)));
+        a.u += off.data[0] / Math.max(1, size[0]);
+        a.v += off.data[1] / Math.max(1, size[1]);
     }
 
     TextureNumLayers(node: CallExpr | Call, context: ExecContext): Data | null {
@@ -1423,6 +1457,7 @@ export class BuiltinFunctions {
         const depthIndex = a.texture.typeInfo.name.includes("_array") ? 4 : 3;
         const refArg = this.exec.evalExpression(node.args[depthIndex], context);
         const ref = refArg instanceof ScalarData ? refArg.value : 0;
+        this._applyOffset(a, node, depthIndex + 1, 0, context);
         const cmp = this._compareFn((d.compare as string) ?? "less-equal");
         const addrU = (d.addressModeU as string) ?? "clamp-to-edge";
         const addrV = (d.addressModeV as string) ?? "clamp-to-edge";
@@ -1522,6 +1557,7 @@ export class BuiltinFunctions {
             lod = stored.value;
             context.clearDerivative(node);
         }
+        this._applyOffset(a, node, a.texture.typeInfo.name.includes("_array") ? 4 : 3, lod, context);
         const sampler = this._resolveSampler(node.args[1], context);
         return this._sampleResult(a.texture, this._sampleTexture(a.texture, a.u, a.v, a.layer, lod, sampler, a.r));
     }
@@ -1540,6 +1576,7 @@ export class BuiltinFunctions {
             lod = stored.value;
             context.clearDerivative(node);
         }
+        this._applyOffset(a, node, a.texture.typeInfo.name.includes("_array") ? 5 : 4, lod, context);
         const sampler = this._resolveSampler(node.args[1], context);
         return this._sampleResult(a.texture, this._sampleTexture(a.texture, a.u, a.v, a.layer, lod, sampler, a.r));
     }
@@ -1553,6 +1590,7 @@ export class BuiltinFunctions {
         const levelIndex = a.texture.typeInfo.name.includes("_array") ? 4 : 3;
         const levelArg = this.exec.evalExpression(node.args[levelIndex], context);
         const lod = levelArg instanceof ScalarData ? levelArg.value : 0;
+        this._applyOffset(a, node, levelIndex + 1, lod, context);
         const sampler = this._resolveSampler(node.args[1], context);
         return this._sampleResult(a.texture, this._sampleTexture(a.texture, a.u, a.v, a.layer, lod, sampler, a.r));
     }
@@ -1582,6 +1620,7 @@ export class BuiltinFunctions {
             const rho = Math.max(scale(ddx.data), scale(ddy.data));
             lod = rho > 0 ? Math.log2(rho) : 0;
         }
+        this._applyOffset(a, node, gradBase + 2, lod, context);
         const sampler = this._resolveSampler(node.args[1], context);
         return this._sampleResult(a.texture, this._sampleTexture(a.texture, a.u, a.v, a.layer, lod, sampler, a.r));
     }
@@ -1634,7 +1673,7 @@ export class BuiltinFunctions {
                 const x = Math.floor(uv.data[0]);
                 const y = Math.floor(uv.data[1]);
                 if (x < 0 || x >= textureSize[0] || y < 0 || y >= textureSize[1]) {
-                    console.error(`Texture ${textureName} out of bounds. Line ${node.line}`);
+                    // Out of bounds: the write is skipped (WGSL, naga ReadZeroSkipWrite).
                     return null;
                 }
 
