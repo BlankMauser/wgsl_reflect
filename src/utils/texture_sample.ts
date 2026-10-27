@@ -74,6 +74,9 @@ export function setTexturePixel(imageData: Uint8Array, x: number, y: number, z: 
         if (_isBGRA(format)) {
             value = [value[2], value[1], value[0], value[3]];
         }
+        if (format.endsWith("-srgb")) {
+            value = value.map((c, i) => (i < 3 ? _linearToSrgb(c) : c));
+        }
         setPixelValue(view, offset, channels[0], channels[1], value);
         return;
     }
@@ -108,7 +111,10 @@ export function getTexturePixel(imageData: Uint8Array, x: number, y: number, z: 
 
     const channels = channelFormats[format];
     if (channels !== undefined) {
-        const value = pixelValue(view, offset, channels[0], channels[1]);
+        let value = pixelValue(view, offset, channels[0], channels[1]);
+        if (format.endsWith("-srgb")) {
+            value = value.map((c, i) => (i < 3 ? _srgbToLinear(c) : c));
+        }
         return _isBGRA(format) ? [value[2], value[1], value[0], value[3]] : value;
     }
 
@@ -128,6 +134,16 @@ export function getTexturePixel(imageData: Uint8Array, x: number, y: number, z: 
     }
 
     return null;
+}
+
+// sRGB transfer functions (WebGPU: -srgb formats are linear to shaders).
+function _srgbToLinear(c: number): number {
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function _linearToSrgb(c: number): number {
+    c = Math.min(Math.max(c, 0), 1);
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 }
 
 // Normalized conversions, following the WebGPU/WGSL texel format rules.
