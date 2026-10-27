@@ -1025,6 +1025,28 @@ export async function run() {
       test.equals(r, [0xc0000000, 0x7fffffff, 15, 0x00ffffff]);
     });
 
+    await test("integer division by zero gives the dividend; snorm packing clamps to [-1, 1]", function (test) {
+      const runU32 = (body, n) => {
+        const shader = `@group(0) @binding(0) var<storage, read_write> inp: array<u32, 4>;
+          @group(0) @binding(1) var<storage, read_write> out: array<u32, ${n}>;
+          @compute @workgroup_size(1) fn main() {
+            let umax = inp[0]; let imin = bitcast<i32>(inp[1]); let mone = bitcast<i32>(inp[0]); let one = inp[2];
+            ${body}
+          }`;
+        const out = new Uint32Array(n);
+        const dbg = new WgslDebug(shader);
+        dbg.debugWorkgroup("main", [0, 0, 0], [1, 1, 1], { 0: { 0: new Uint32Array([0xffffffff, 0x80000000, 1, 0]).buffer, 1: out.buffer } });
+        let steps = 0;
+        while (dbg.stepNext()) { if (++steps > 10000) break; }
+        return Array.from(out);
+      };
+      const r = runU32(`let z = umax - umax; let m15 = -1.5 * f32(one);
+            out[0] = bitcast<u32>(bitcast<i32>(one * 7u) / bitcast<i32>(z)); out[1] = umax / z; out[2] = (vec2<u32>(umax, 9u) / vec2<u32>(z, 2u)).x;
+            out[3] = (umax - 7u) / 1000u; out[4] = bitcast<u32>(mone * 7 / 2); out[5] = pack4x8snorm(vec4<f32>(m15, -0.75, 0.75, 1.0));
+            out[6] = pack2x16snorm(vec2<f32>(m15, 0.75));`, 7);
+      test.equals(r, [7, 0xffffffff, 0xffffffff, 4294967, (-3) >>> 0, 0x7f5fa181, 0x5fff8001]);
+    });
+
     await test("type-inferred array constructor", function (test) {
       const shader = `
         @vertex

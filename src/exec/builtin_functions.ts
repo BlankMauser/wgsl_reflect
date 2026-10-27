@@ -2128,10 +2128,9 @@ export class BuiltinFunctions {
 
     // Data Packing Built-in Functions
     _packSnormByte(v: number): number {
-        // clamp(round(v * 127), -128, 127) as signed 8-bit
-        const s = Math.round(v * 127);
-        const c = s < -128 ? -128 : s > 127 ? 127 : s;
-        return c & 0xff;
+        // WGSL: floor(0.5 + 127 * clamp(v, -1, 1)) as signed 8-bit (-1.5
+        // packs to -127, not -128).
+        return Math.floor(0.5 + 127 * Math.min(1, Math.max(-1, v))) & 0xff;
     }
 
     _packUnormByte(v: number): number {
@@ -2235,11 +2234,8 @@ export class BuiltinFunctions {
             return null;
         }
         const d = e.data;
-        const half = (v: number) => {
-            const s = Math.round(v * 32767);
-            const c = s < -32768 ? -32768 : s > 32767 ? 32767 : s;
-            return c & 0xffff;
-        };
+        // WGSL: floor(0.5 + 32767 * clamp(v, -1, 1)) as signed 16-bit.
+        const half = (v: number) => Math.floor(0.5 + 32767 * Math.min(1, Math.max(-1, v))) & 0xffff;
         const result = (half(d[0]) | (half(d[1]) << 16)) >>> 0;
         return new ScalarData(result, this.getTypeInfo("u32"));
     }

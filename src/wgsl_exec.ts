@@ -1813,6 +1813,12 @@ export class WgslExec extends ExecInterface {
         return null;
     }
 
+    // WGSL integer division: truncates toward zero; x / 0 is x (and i32
+    // MIN / -1 is MIN, which storing 2^31 as i32 gives).
+    _intDiv(a: number, b: number): number {
+        return b === 0 ? a : Math.trunc(a / b);
+    }
+
     _evalBinaryOp(node: BinaryOperator, context: ExecContext): Data | null {
         // The postfix is applied to the (possibly parenthesized) expression's
         // result: e.g. the ".w" of `(v * 2.0).w`.
@@ -1988,23 +1994,26 @@ export class WgslExec extends ExecInterface {
                         console.error(`Vector length mismatch: ${_l.typeInfo.getTypeName()}[${la.length}] '${node.operator}' ${_r.typeInfo.getTypeName()}[${ra.length}]. Line ${node.line}.`);
                         return null;
                     }
-                    const result = la.map((x: number, i: number) => x / ra[i]);
+                    const int = this._intKind(_l.typeInfo) !== null;
+                    const result = la.map((x: number, i: number) => int ? this._intDiv(x, ra[i]) : x / ra[i]);
                     return this._makeCwiseData(result, _l.typeInfo);
                 } else if (isArray(l)) {
                     const la = l as number[];
                     const rn = r as number;
-                    const result = la.map((x: number, i: number) => x / rn);
+                    const int = this._intKind(_l.typeInfo) !== null;
+                    const result = la.map((x: number, i: number) => int ? this._intDiv(x, rn) : x / rn);
                     return this._makeCwiseData(result, _l.typeInfo);
                 } else if (isArray(r)) {
                     const ln = l as number;
                     const ra = r as number[];
-                    const result = ra.map((x: number, i: number) => ln / x);
+                    const int = this._intKind(_r.typeInfo) !== null;
+                    const result = ra.map((x: number, i: number) => int ? this._intDiv(ln, x) : ln / x);
                     return this._makeCwiseData(result, _r.typeInfo);
                 }
                 const ln = l as number;
                 const rn = r as number;
                 const t = this._maxFormatTypeInfo([_l.typeInfo, _r.typeInfo]);
-                return new ScalarData(ln / rn, t);
+                return new ScalarData(this._intKind(t) !== null ? this._intDiv(ln, rn) : ln / rn, t);
             }
             case "&": {
                 if (isArray(l) && isArray(r)) {
