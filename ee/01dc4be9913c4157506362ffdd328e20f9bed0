@@ -1,0 +1,14 @@
+src/utils/texture_sample.ts
+  h_03360edcd9e88f 77-79,114-117,139-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ee01dc4be9913c4157506362ffdd328e20f9bed0",
+  "prompts": {},
+  "humans": {
+    "h_03360edcd9e88f": {
+      "author": "BlankMauser <thomasluvan@gmail.com>"
+    }
+  }
+}
