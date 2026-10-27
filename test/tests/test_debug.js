@@ -813,6 +813,68 @@ export async function run() {
       test.equals(dbg.getReturnValue(), [1, 0, 0, 1]);
     });
 
+    await test("textureSampleLevel applies the texel offset", function (test) {
+      const px = (r) => [r, 0, 0, 255];
+      const mip0 = new Uint8Array([...px(0), ...px(85), ...px(170), ...px(255)]);
+      const bg = { 0: {
+        0: { texture: [mip0.buffer], descriptor: { format: "rgba8unorm", size: [4, 1, 1], mipLevelCount: 1, dimension: "2d" } },
+        1: { sampler: { magFilter: "nearest", minFilter: "nearest" } } } };
+      const shader = `
+        @group(0) @binding(0) var t: texture_2d<f32>;
+        @group(0) @binding(1) var s: sampler;
+        @fragment
+        fn main(@location(0) uv: vec2f) -> @location(0) vec4f {
+          return textureSampleLevel(t, s, uv, 0.0, vec2<i32>(2, 0));
+        }`;
+      const dbg = new WgslDebug(shader);
+      dbg.debugFragment("main", { 0: [0.125, 0.5] }, bg); // texel 0, offset +2 -> texel 2
+      while (dbg.stepNext());
+      test.equals(dbg.getReturnValue(), [170 / 255, 0, 0, 1], 1e-6);
+    });
+
+    await test("rgba8unorm-srgb reads decode to linear", function (test) {
+      const mip0 = new Uint8Array([188, 0, 255, 255]);
+      const bg = { 0: { 0: { texture: [mip0.buffer], descriptor: { format: "rgba8unorm-srgb", size: [1, 1, 1], mipLevelCount: 1, dimension: "2d" } } } };
+      const shader = `
+        @group(0) @binding(0) var t: texture_2d<f32>;
+        @fragment
+        fn main() -> @location(0) vec4f {
+          return textureLoad(t, vec2<i32>(0, 0), 0);
+        }`;
+      const dbg = new WgslDebug(shader);
+      dbg.debugFragment("main", {}, bg);
+      while (dbg.stepNext());
+      const v = dbg.getReturnValue();
+      test.equals([v[1], v[2], v[3]], [0, 1, 1], 1e-6);
+      test.closeTo(v[0], Math.pow((188 / 255 + 0.055) / 1.055, 2.4), 1e-6);
+    });
+
+    await test("textureLoad: depth is f32, integer textures are vec4u, out of bounds is zero", function (test) {
+      const depth = new Float32Array([0.25, 0.5, 0.75, 1.0]);
+      const ids = new Uint32Array([7, 8, 9, 10]);
+      const bg = { 0: {
+        0: { texture: [depth.buffer], descriptor: { format: "depth32float", size: [2, 2, 1], mipLevelCount: 1, dimension: "2d" } },
+        1: { texture: [ids.buffer], descriptor: { format: "r32uint", size: [2, 2, 1], mipLevelCount: 1, dimension: "2d" } } } };
+      const shader = `
+        @group(0) @binding(0) var d: texture_depth_2d;
+        @group(0) @binding(1) var ids: texture_2d<u32>;
+        @fragment
+        fn main() -> @location(0) vec4f {
+          var best = 0.0;
+          for (var x = -1; x <= 2; x++) {
+            let z = textureLoad(d, vec2<i32>(x, 1), 0);
+            if (z > best) { best = z; }
+          }
+          let id = textureLoad(ids, vec2<i32>(1, 1), 0).x;
+          let outside = textureLoad(ids, vec2<i32>(5, 5), 0).x;
+          return vec4f(best, f32(id), f32(outside), 1.0);
+        }`;
+      const dbg = new WgslDebug(shader);
+      dbg.debugFragment("main", {}, bg);
+      while (dbg.stepNext());
+      test.equals(dbg.getReturnValue(), [1, 10, 0, 1]);
+    });
+
     await test("single-lane derivatives are zero", function (test) {
       const shader = `
         @fragment
