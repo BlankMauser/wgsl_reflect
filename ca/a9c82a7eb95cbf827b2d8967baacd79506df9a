@@ -1,0 +1,14 @@
+src/exec/builtin_functions.ts
+  h_03360edcd9e88f 1187-1188,1677-1678
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "caa9c82a7eb95cbf827b2d8967baacd79506df9a",
+  "prompts": {},
+  "humans": {
+    "h_03360edcd9e88f": {
+      "author": "BlankMauser <thomasluvan@gmail.com>"
+    }
+  }
+}
