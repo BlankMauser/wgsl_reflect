@@ -1,0 +1,18 @@
+src/exec/builtin_functions.ts
+  h_03360edcd9e88f 2131-2133,2237-2238
+src/wgsl_exec.ts
+  h_03360edcd9e88f 1816-1821,1997-1998,2003-2004,2009-2010,2016
+test/tests/test_debug.js
+  h_03360edcd9e88f 1028-1049
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a77c38b56ca619d2b53f012c28f57a577ce6bda",
+  "prompts": {},
+  "humans": {
+    "h_03360edcd9e88f": {
+      "author": "BlankMauser <thomasluvan@gmail.com>"
+    }
+  }
+}
