@@ -830,6 +830,11 @@ export class WgslScanner {
           if (TokenTypes.assignment_operators.includes(this._tokens[ti].type)) {
             break;
           }
+          // Inside parentheses opened after the '<' (bitcast<i32>(a >> b)),
+          // the '<' does not enclose this '>': it is a shift.
+          if (this._tokens[ti].type === TokenTypes.tokens.paren_left) {
+            break;
+          }
           if (this._tokens[ti].type === TokenTypes.tokens.less_than) {
             if (ti > 0 && this._tokens[ti - 1].isArrayOrTemplateType()) {
               foundLessThan = true;
