@@ -1184,7 +1184,8 @@ export class BuiltinFunctions {
                 const z = Math.floor(zVal);
                 const level = Math.floor(mipLevel)
                 // Out of bounds: WGSL lets an implementation return any texel or
-                // zero; wgpu (naga's ReadZeroSkipWrite) returns zero.
+                // zero. This returns zero, as GPUs with robust image access do
+                // (wgpu on Vulkan without it clamps to the edge texel instead).
                 const size = texture.getMipLevelSize(level);
                 const outside = x < 0 || x >= Math.max(1, size[0]) || y < 0 || y >= Math.max(1, size[1]);
                 const texel = outside ? [0, 0, 0, 0] : texture.getPixel(x, y, z, level);
@@ -1673,7 +1674,8 @@ export class BuiltinFunctions {
                 const x = Math.floor(uv.data[0]);
                 const y = Math.floor(uv.data[1]);
                 if (x < 0 || x >= textureSize[0] || y < 0 || y >= textureSize[1]) {
-                    // Out of bounds: the write is skipped (WGSL, naga ReadZeroSkipWrite).
+                    // Out of bounds: the write is skipped (WGSL allows it; GPUs with
+                    // robust image access skip it).
                     return null;
                 }
 
